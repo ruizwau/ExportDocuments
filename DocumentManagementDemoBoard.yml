@@ -1,0 +1,87 @@
+name: AWS S3 Storage Microservice
+description: Microservice for managing AWS S3 buckets, folders, and file uploads across U.S. regions.
+columns:
+  - name: 🧭 Phase 1: Discovery & Architecture Definition
+    cards:
+      - Define high-level scope and main goals of the service
+      - Identify target consumers (mobile app, web app, backend APIs, etc.)
+      - Research S3 storage classes (Standard, Intelligent-Tiering, Glacier)
+      - Compare S3 pricing across U.S. regions (us-east-1, us-west-2)
+      - Investigate Multi-Region Access Points (MRAP) and Cross-Region Replication (CRR)
+      - Define data residency and compliance constraints (U.S.-only)
+      - Define security standards (IAM roles, encryption, ACL policy)
+      - Select region strategy (Primary + Failover region)
+      - Choose architecture model (REST API vs Lambda event-driven)
+      - Draw high-level architecture diagram (API Gateway → ECS/Lambda → S3 → CloudWatch)
+
+  - name: ⚙️ Phase 2: API Design & Data Model
+    cards:
+      - Define bucket naming convention (`{env}-{region}-{tenant}-{purpose}`)
+      - Define key/prefix schema (`{tenant}/{state}/{yyyy}/{MM}/{dd}/{type}/{uuid}.{ext}`)
+      - Draft REST API endpoints (buckets, folders, uploads, downloads, list, delete)
+      - Define DTOs and validation rules (size limits, MIME type whitelist)
+      - Create OpenAPI / Swagger specification
+      - Review API error handling and response consistency
+
+  - name: 🧠 Phase 3: AWS SDK & Infrastructure Investigation
+    cards:
+      - Prototype IAmazonS3 usage in C#
+      - Test bucket creation (PutBucketAsync, GetBucketLocationAsync)
+      - Verify pre-signed URL generation for PUT/GET
+      - Test multipart upload lifecycle (initiate → upload parts → complete)
+      - Investigate S3 event notifications (S3 → SQS / S3 → Lambda)
+      - Research lifecycle policies (auto-move to Glacier or delete temp uploads)
+      - Evaluate CloudWatch metrics and logging for S3
+      - Verify cross-region replication setup and failover behavior
+
+  - name: 🛡️ Phase 4: Security & Permissions
+    cards:
+      - Design IAM policy templates for API and replication roles
+      - Enforce bucket ownership (bucket-owner-enforced)
+      - Require encryption headers (x-amz-server-side-encryption)
+      - Block all public access and enforce HTTPS
+      - Configure bucket policies with least privilege
+      - Enable CloudTrail data event logging
+      - Add CloudWatch alarms for access or replication errors
+
+  - name: 🚀 Phase 5: Implementation
+    cards:
+      - Create .NET project structure (API, Application, Domain, Infrastructure)
+      - Register AWS SDK clients in DI
+      - Implement bucket and folder endpoints
+      - Implement pre-signed PUT/GET endpoints
+      - Implement multipart upload endpoints
+      - Add validation and error-handling middleware
+      - Integrate Serilog with CloudWatch
+      - Load AWS credentials/region from Parameter Store
+      - Add global exception filters for AWS SDK exceptions
+
+  - name: 🧪 Phase 6: Testing & Hardening
+    cards:
+      - Unit tests: mock IAmazonS3
+      - Integration tests: sandbox bucket
+      - Load tests: concurrent uploads/downloads
+      - Security tests: invalid signatures, blocked MIME types
+      - Test versioning and lifecycle rules
+      - Validate encryption and KMS key policies
+      - Estimate cost per region and usage scenario
+
+  - name: 📈 Phase 7: Documentation & Rollout
+    cards:
+      - Write developer onboarding guide
+      - Document bucket structure and policies
+      - Provide curl examples for upload/download
+      - Create Terraform/CDK IaC templates
+      - Create environment-specific config templates
+      - Define deployment pipeline (GitHub Actions / CodePipeline)
+      - Add CloudWatch or Grafana dashboards
+      - Plan cost optimization and maintenance review
+
+  - name: 🔮 Optional Future Epics
+    cards:
+      - Integrate S3 event triggers (Lambda thumbnails, scanning)
+      - Add metadata tracking database (DynamoDB / RDS)
+      - Add CloudFront distribution for CDN delivery
+      - Implement signed URL validation middleware
+      - Add RBAC / OIDC-based access control
+      - Implement audit logs and version history endpoints
