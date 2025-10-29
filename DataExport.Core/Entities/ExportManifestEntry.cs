@@ -11,7 +11,6 @@ public class ExportManifestEntry
     public string S3Key { get; set; } = string.Empty;
     public bool Success { get; set; } = true;
     public int? RowsExported { get; set; }
-    public int? FirstId { get; set; }
     public string? ErrorMessage { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime LoggedAt { get; set; } = DateTime.UtcNow;

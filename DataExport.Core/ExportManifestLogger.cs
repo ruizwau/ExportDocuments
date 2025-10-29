@@ -33,9 +33,9 @@ public class ExportManifestLogger : IExportManifestLogger
 
         string sql = @"
 INSERT INTO dbo.ExportManifest
-(BatchNumber, PageNumber, PageIndex, S3Key, Success, RowsExported, FirstId, ErrorMessage, CreatedAt, LoggedAt)
+(BatchNumber, PageNumber, PageIndex, S3Key, Success, RowsExported, ErrorMessage, CreatedAt, LoggedAt)
 VALUES
-(@BatchNumber, @PageNumber, @PageIndex, @S3Key, @Success, @RowsExported, @FirstId, @ErrorMessage, @CreatedAt, @LoggedAt);
+(@BatchNumber, @PageNumber, @PageIndex, @S3Key, @Success, @RowsExported, @ErrorMessage, @CreatedAt, @LoggedAt);
 ";
 
 
