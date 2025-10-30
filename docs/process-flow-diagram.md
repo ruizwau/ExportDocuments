@@ -6,38 +6,43 @@ graph TD
     B --> C[🔧 Configure Services<br/>- ExportOptions<br/>- S3 Client<br/>- FileSqlProvider<br/>- ExportService]
     C --> D[🎯 Start Export Process]
     
-    D --> E[🔍 Load SQL Files<br/>- count_export_projects.sql<br/>- export_projects_paged.sql]
-    E --> F[🗄️ Connect to SQL Server<br/>DummyExportDB]
-    F --> G[📊 Get Total Project Count<br/>SELECT COUNT(*) FROM Project]
+    D --> E[🔍 Load SQL Files via ISqlProvider<br/>- count_export.sql<br/>- export_paged.sql<br/>- insert_export_manifest.sql<br/>- check_page_exported.sql]
+    E --> F[🗄️ Connect to Source DB<br/>ScoopReportsDb]
+    F --> F2[🗄️ Setup Monitoring DB<br/>DataMigrationMonitoring]
+    F2 --> G[📊 Get Total Record Count<br/>Dynamic Count Query]
     G --> H[📐 Calculate Pagination<br/>- Total Pages<br/>- Pages per Batch]
     
     H --> I[🔄 For Each Batch]
     I --> J[📄 For Each Page in Batch]
     
     J --> K[🔍 Execute Paged Query<br/>WITH @Offset, @Limit]
-    K --> L[📋 Fetch Project Data<br/>+ Tasks + Documents + Comments<br/>AS JSON]
-    L --> M[☁️ Upload to S3<br/>exports/batch_X/projects_page_Y.json]
-    M --> N[📝 Log to ExportManifest Table<br/>- BatchNumber<br/>- PageNumber<br/>- S3Key<br/>- Success/Error]
+    K --> L[📋 Fetch Dynamic Data<br/>Hierarchical JSON Structure<br/>Using dynamic objects]
+    L --> M[🔄 JSON Serialization<br/>camelCase formatting<br/>Pretty printing]
+    M --> N[☁️ Upload to S3<br/>export_batch_X_page_Y.json]
+    N --> O[📝 Log via SQL File<br/>insert_export_manifest.sql<br/>to DataMigrationMonitoring]
     
-    N --> O{More Pages?}
-    O -->|Yes| J
-    O -->|No| P{More Batches?}
-    P -->|Yes| I
-    P -->|No| Q[✅ Export Complete]
+    O --> P{More Pages?}
+    P -->|Yes| J
+    P -->|No| Q{More Batches?}
+    Q -->|Yes| I
+    Q -->|No| R[✅ Export Complete<br/>All data in S3<br/>Full audit trail in DB]
     
-    subgraph "🗄️ Database Tables"
-        DB1[Project]
-        DB2[Task]
-        DB3[Document]
-        DB4[DocumentComment]
-        DB5[ExportManifest]
+    subgraph "🗄️ Source Database (ScoopReportsDb)"
+        DB1[CaseFile]
+        DB2[Case]
+        DB3[Person]
+        DB4[Other tables...]
     end
     
-    subgraph "☁️ AWS S3 Bucket"
-        S3A[exports/batch_1/projects_page_1.json]
-        S3B[exports/batch_1/projects_page_2.json]
-        S3C[exports/batch_2/projects_page_3.json]
-        S3D[...]
+    subgraph "📊 Monitoring Database (DataMigrationMonitoring)"
+        DB5[ExportManifest<br/>- Batch tracking<br/>- Success/Error logs<br/>- Performance metrics]
+    end
+    
+    subgraph "☁️ AWS S3 Bucket (deltabonafide)"
+        S3A[export_batch1_page0.json]
+        S3B[export_batch2_page1.json]
+        S3C[export_batch3_page2.json]
+        S3D[Dynamic JSON structure<br/>with camelCase properties]
     end
     
     subgraph "📁 Configuration Files"
@@ -66,14 +71,16 @@ graph TD
 
 ```mermaid
 graph LR
-    subgraph "🖥️ Application Layer"
-        A1[DataExport.Worker<br/>Console App]
-        A2[DataExport.Core<br/>Business Logic]
+    subgraph "� Application Layer"
+        A1[DataExport.Worker<br/>Console Host + DI]
+        A2[DataExport.Core<br/>Dynamic Object Processing]
+        A3[ISqlProvider Pattern<br/>External Query Management]
     end
     
-    subgraph "💾 Data Layer"
-        D1[SQL Server<br/>DummyExportDB]
-        D2[FileSqlProvider<br/>SQL Files]
+    subgraph "�️ Data Layer"
+        D1[ScoopReportsDb<br/>Source Data]
+        D2[DataMigrationMonitoring<br/>Export Logs]
+        D3[External SQL Files<br/>Version Controlled Queries]
     end
     
     subgraph "☁️ Cloud Layer"
@@ -85,6 +92,8 @@ graph LR
     end
     
     A1 --> A2
+    A2 --> A3
+    A3 --> D3
     A2 --> D1
     A2 --> D2
     A2 --> C1

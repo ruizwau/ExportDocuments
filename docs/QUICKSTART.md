@@ -8,7 +8,10 @@
 dotnet --version
 
 # Check SQL Server connection
-sqlcmd -S "LAPTOP-2GHN6DAS\LOCAL" -d "DummyExportDB" -E -Q "SELECT COUNT(*) FROM Project"
+sqlcmd -S "LAPTOP-2GHN6DAS\LOCAL" -d "ScoopReportsDb" -E -Q "SELECT COUNT(*) FROM CaseFile"
+
+# Setup monitoring database (one-time)
+sqlcmd -S "LAPTOP-2GHN6DAS\LOCAL" -E -i "Sql/create_export_manifest_table.sql"
 
 # Verify AWS credentials
 aws s3 ls s3://deltabonafide
@@ -47,8 +50,11 @@ Looking for SQL file: export_projects_paged ✅
 ✅ Successfully exported batch 3, page 2 to S3
 ```
 
-### Check Results in Database
+### Check Results in Monitoring Database
 ```sql
+-- Connect to monitoring database
+USE DataMigrationMonitoring;
+
 -- View export log
 SELECT 
     BatchNumber,
@@ -60,6 +66,14 @@ SELECT
     ErrorMessage
 FROM ExportManifest 
 ORDER BY LoggedAt DESC;
+
+-- Check success rate
+SELECT 
+    Success,
+    COUNT(*) as Count,
+    AVG(RowsExported) as AvgRowsPerPage
+FROM ExportManifest 
+GROUP BY Success;
 ```
 
 ### Check S3 Objects

@@ -4,7 +4,6 @@ using Dapper;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Options;
 using System.Text.Json;
-using System.Data;
 using DataExport.Core.Sql;
 using DataExport.Core.Entities;
 
@@ -112,11 +111,11 @@ namespace DataExport.Core
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
 
-            string sql = _sqlProvider.Get("export_projects_paged");
+            string sql = _sqlProvider.Get("export_paged");
             int offset = pageIndex * pageSize;
             var queryParams = new { Offset = offset, Limit = pageSize };
-
-            string? jsonResult = await connection.ExecuteScalarAsync<string>(sql, queryParams);
+            var command = new CommandDefinition(sql, queryParams, cancellationToken: cancellationToken, commandTimeout: 180);
+            string? jsonResult = await connection.ExecuteScalarAsync<string>(command);
             return jsonResult ?? "[]";
         }
 
@@ -142,7 +141,7 @@ namespace DataExport.Core
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
 
-            string countSql = _sqlProvider.Get("export_projects_count");
+            string countSql = _sqlProvider.Get("export_count");
             var command = new CommandDefinition(countSql, cancellationToken: cancellationToken);
             int total = await connection.ExecuteScalarAsync<int>(command);
 
@@ -168,7 +167,6 @@ namespace DataExport.Core
 
             return 0;
         }
-
 
         /// <summary>Generates S3 object key for batch and page.</summary>
         private string GenerateObjectKey(int batchNumber, int pageIndex)

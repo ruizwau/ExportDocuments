@@ -2,7 +2,7 @@
 
 ## 🎯 Overview
 
-The DataExport Solution is a .NET 8 console application designed to export project data from a SQL Server database to AWS S3 in JSON format. The solution implements batch processing with pagination, robust error handling, and comprehensive logging.
+The DataExport Solution is a .NET 8 console application designed to export hierarchical project data from a SQL Server database to AWS S3 in JSON format. The solution uses dynamic objects for flexibility, implements batch processing with pagination, robust error handling, and comprehensive logging to a dedicated monitoring database.
 
 ## 🏗️ Architecture
 
@@ -18,9 +18,11 @@ DataExportSolution/
 │   ├── Program.cs            # Application configuration and startup
 │   └── appsettings.json      # Configuration settings
 ├── Sql/                      # SQL query files
-│   ├── count_export_projects.sql
-│   ├── export_projects_paged.sql
-│   └── create_export_manifest_table.sql
+│   ├── count_export.sql          # Count total records
+│   ├── export_paged.sql          # Paginated export query
+│   ├── insert_export_manifest.sql # Log export entries
+│   ├── check_page_exported.sql   # Check export status
+│   └── create_export_manifest_table.sql # DB & table setup
 └── docs/                     # Documentation
 ```
 
@@ -39,12 +41,15 @@ DataExportSolution/
   "Sql": {
     "BasePath": "C:\\...\\Sql",         // Path to SQL files
     "Queries": {
-      "export_projects_paged": "export_projects_paged.sql",
-      "export_projects_count": "count_export_projects.sql"
+      "export_paged": "export_paged.sql",
+      "export_count": "count_export.sql",
+      "insert_export_manifest": "insert_export_manifest.sql",
+      "check_page_exported": "check_page_exported.sql"
     }
   },
-  "ConnectionStrings": {
-    "Default": "server=...;Database=DummyExportDB;..."
+  "Export": {
+    "ConnectionString": "server=...;Database=ScoopReportsDb;...",
+    "ConnectionStringLog": "server=...;Database=DataMigrationMonitoring;..."
   }
 }
 ```
@@ -74,25 +79,45 @@ CREATE TABLE dbo.ExportManifest (
 );
 ```
 
-## 🔄 Process Flow
+## � Recent Improvements
+
+### Dynamic Object Architecture
+- **Removed DTOs**: Eliminated rigid data transfer objects for better flexibility
+- **Dynamic Processing**: Uses `dynamic` objects to handle varying data structures
+- **Simplified Code**: Reduced complexity and improved maintainability
+
+### External SQL Query Management
+- **Centralized Queries**: All SQL queries moved to `/Sql` folder
+- **ISqlProvider Pattern**: Consistent query loading across all services
+- **Version Control**: SQL queries are now trackable and deployable
+- **Easy Maintenance**: No recompilation needed for query changes
+
+### Dedicated Monitoring Database
+- **DataMigrationMonitoring**: Separate database for export logging
+- **Complete Setup**: Auto-creates database and tables via SQL scripts
+- **Isolated Logging**: Export logs don't interfere with source data
+
+## �🔄 Process Flow
 
 ### 1. Initialization
 - Load configuration from `appsettings.json`
 - Configure dependency injection container
 - Initialize AWS S3 client and SQL providers
+- Setup dedicated logging database
 
 ### 2. Data Discovery
-- Execute `count_export_projects.sql` to get total record count
+- Execute `count_export.sql` to get total record count
 - Calculate pagination parameters (total pages, pages per batch)
 
 ### 3. Batch Processing
 For each batch:
 - Calculate page range for the batch
 - Process each page within the batch
+- Log progress to monitoring database
 
 ### 4. Page Processing
 For each page:
-- Execute `export_projects_paged.sql` with `@Offset` and `@Limit` parameters
+- Execute `export_paged.sql` with `@Offset` and `@Limit` parameters
 - Retrieve hierarchical JSON data (Projects → Tasks, Documents → Comments)
 - Upload JSON to S3 with key format: `exports/batch_{N}/projects_page_{N}.json`
 - Log operation result to `ExportManifest` table

@@ -30,7 +30,12 @@ var host = Host.CreateDefaultBuilder(args)
         // SqlProvider that reads from SQL files (relative path configured)
         services.AddSingleton<ISqlProvider, FileSqlProvider>();
 
-        services.AddSingleton<IExportManifestLogger>(new ExportManifestLogger(config["Export:ConnectionString"]));
+        // ExportManifestLogger with SqlProvider dependency
+        services.AddSingleton<IExportManifestLogger>(provider => 
+            new ExportManifestLogger(
+                config["Export:ConnectionStringLog"] ?? throw new InvalidOperationException("ConnectionStringLog is required"), 
+                provider.GetRequiredService<ISqlProvider>()
+            ));
 
         // Main export service
         services.AddTransient<ExportService>();

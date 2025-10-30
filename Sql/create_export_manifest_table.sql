@@ -1,3 +1,14 @@
+-- Create database if it doesn't exist
+IF NOT EXISTS (SELECT name FROM sys.databases WHERE name = 'DataMigrationMonitoring')
+BEGIN
+    CREATE DATABASE DataMigrationMonitoring;
+END
+GO
+
+-- Use the database
+USE DataMigrationMonitoring;
+GO
+
 -- Create ExportManifest table to track export progress
 -- Drop table if it exists to recreate with correct schema
 IF EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'dbo.ExportManifest') AND type in (N'U'))
@@ -14,7 +25,6 @@ CREATE TABLE dbo.ExportManifest (
     S3Key NVARCHAR(500) NOT NULL,
     Success BIT NOT NULL DEFAULT 1,  -- Column that was missing  
     RowsExported INT NULL,
-    FirstId INT NULL,
     ErrorMessage NVARCHAR(MAX) NULL,
     CreatedAt DATETIME2 DEFAULT GETUTCDATE(),
     LoggedAt DATETIME2 DEFAULT GETUTCDATE()  -- Column that was missing

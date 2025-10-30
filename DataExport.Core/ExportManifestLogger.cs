@@ -1,7 +1,7 @@
 ﻿using Dapper;
 using Microsoft.Data.SqlClient;
-using System.Data;
 using DataExport.Core.Entities;
+using DataExport.Core.Sql;
 
 
 namespace DataExport.Core;
@@ -17,11 +17,12 @@ public interface IExportManifestLogger
 public class ExportManifestLogger : IExportManifestLogger
 {
     private readonly string _connectionString;
+    private readonly ISqlProvider _sqlProvider;
 
-
-    public ExportManifestLogger(string connectionString)
+    public ExportManifestLogger(string connectionString, ISqlProvider sqlProvider)
     {
         _connectionString = connectionString;
+        _sqlProvider = sqlProvider;
     }
 
 
@@ -30,15 +31,7 @@ public class ExportManifestLogger : IExportManifestLogger
         await using var connection = new SqlConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
 
-
-        string sql = @"
-INSERT INTO dbo.ExportManifest
-(BatchNumber, PageNumber, PageIndex, S3Key, Success, RowsExported, ErrorMessage, CreatedAt, LoggedAt)
-VALUES
-(@BatchNumber, @PageNumber, @PageIndex, @S3Key, @Success, @RowsExported, @ErrorMessage, @CreatedAt, @LoggedAt);
-";
-
-
+        string sql = _sqlProvider.Get("insert_export_manifest");
         await connection.ExecuteAsync(sql, entry);
     }
 
@@ -48,14 +41,7 @@ VALUES
         await using var connection = new SqlConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
 
-
-        string sql = @"
-SELECT COUNT(1)
-FROM dbo.ExportManifest
-WHERE BatchNumber = @BatchNumber AND PageIndex = @PageIndex AND Success = 1;
-";
-
-
+        string sql = _sqlProvider.Get("check_page_exported");
         return await connection.ExecuteScalarAsync<int>(sql, new { BatchNumber = batchNumber, PageIndex = pageIndex }) > 0;
     }
 }
