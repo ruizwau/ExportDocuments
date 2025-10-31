@@ -4,17 +4,23 @@ using Dapper;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Options;
 using System.Text.Json;
+using System.Text.Encodings.Web; // for UnsafeRelaxedJsonEscaping (optional)
 using DataExport.Core.Sql;
 using DataExport.Core.Entities;
 
 namespace DataExport.Core
 {
-
     /// <summary>
     /// Service to export data from SQL to S3 in batches.
     /// </summary>
     public class ExportService
     {
+        private static readonly JsonSerializerOptions JsonOptions = new()
+        {
+            DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+            Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping // optional: preserves HTML/JSON fragments verbatim
+        };
+
         private readonly IAmazonS3 _s3Client;
         private readonly ISqlProvider _sqlProvider;
         private readonly ExportOptions _options;
@@ -36,24 +42,25 @@ namespace DataExport.Core
         public async Task RunExportAsync(int? batchNumber = null, CancellationToken cancellationToken = default)
         {
             int totalBatches = _options.BatchCount;
+            long lastId = 0;
             if (batchNumber.HasValue)
             {
                 if (batchNumber < 1 || batchNumber > totalBatches)
                     throw new ArgumentOutOfRangeException(nameof(batchNumber), "Batch number is out of range.");
-                await ExportBatchAsync(batchNumber.Value, totalBatches, cancellationToken);
+                await ExportBatchAsync(batchNumber.Value, totalBatches, lastId, cancellationToken);
             }
             else
             {
                 for (int currentBatch = 1; currentBatch <= totalBatches; currentBatch++)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    await ExportBatchAsync(currentBatch, totalBatches, cancellationToken);
+                    lastId = await ExportBatchAsync(currentBatch, totalBatches, lastId, cancellationToken);
                 }
             }
         }
 
         /// <summary>Processes a single batch export with pagination.</summary>
-        private async Task ExportBatchAsync(int batchNumber, int totalBatches, CancellationToken cancellationToken)
+        private async Task<long> ExportBatchAsync(int batchNumber, int totalBatches, long lastId, CancellationToken cancellationToken)
         {
             int pageSize = _options.PageSize;
             int totalRecords = await GetTotalRecordCountAsync(cancellationToken);
@@ -62,28 +69,37 @@ namespace DataExport.Core
             int startPageIndex = (batchNumber - 1) * pagesPerBatch;
             int endPageIndex = Math.Min(totalPages - 1, batchNumber * pagesPerBatch - 1);
 
+            // Keyset cursor for this batch
+
             for (int pageIndex = startPageIndex; pageIndex <= endPageIndex; pageIndex++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+
                 try
                 {
-                    string records = await FetchPageDataAsync(pageIndex, pageSize, cancellationToken);
-                    string objectKey = GenerateObjectKey(batchNumber, pageIndex);
+                    // Force 1 per page
+                    var (json, rowCount, onlyId) = await FetchSingleReportPageAsync(lastId, cancellationToken);
+                    if (rowCount == 0) break;
+                    // advance keyset cursor to that id
 
-                    await UploadToS3Async(objectKey, records, cancellationToken);
-                    int rowsExported = CountJsonArrayItems(records);
 
-                    Console.WriteLine($"Successfully exported batch {batchNumber}, page {pageIndex} to S3");
+                    string objectKey = GenerateObjectKey(batchNumber, pageIndex, onlyId);
+                    await UploadToS3Async(objectKey, json, cancellationToken);
+
+                    Console.WriteLine($"Exported batch {batchNumber}, page {pageIndex}, id {onlyId}");
+
                     await _manifestLogger.LogAsync(new ExportManifestEntry
                     {
                         BatchNumber = batchNumber,
                         PageIndex = pageIndex,
                         PageNumber = pageIndex + 1,
-                        S3Key = GenerateObjectKey(batchNumber, pageIndex),
+                        S3Key = objectKey,
                         Success = true,
-                        RowsExported = rowsExported,
+                        RowsExported = rowCount,   // will be 1
                         ErrorMessage = ""
                     }, cancellationToken);
+
+                    lastId = onlyId;
                 }
                 catch (Exception ex)
                 {
@@ -93,30 +109,75 @@ namespace DataExport.Core
                         BatchNumber = batchNumber,
                         PageIndex = pageIndex,
                         PageNumber = pageIndex + 1,
-                        S3Key = GenerateObjectKey(batchNumber, pageIndex),
+                        S3Key = "",
                         Success = false,
                         RowsExported = null,
                         ErrorMessage = ex.Message
                     }, cancellationToken);
                 }
             }
+            return lastId;
         }
 
-        /// <summary>Fetches paginated data from database as JSON.</summary>
-        private async Task<string> FetchPageDataAsync(int pageIndex, int pageSize, CancellationToken cancellationToken)
+        /// <summary>Fetches exactly one ScoopReport (next by keyset) and its children, serialized as a one-item JSON array.</summary>
+        private async Task<(string json, int rowCount, long onlyId)> FetchSingleReportPageAsync(
+            long lastId, CancellationToken ct)
         {
             if (string.IsNullOrEmpty(_connectionString))
                 throw new InvalidOperationException("Database connection string is not configured.");
 
             await using var connection = new SqlConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await connection.OpenAsync(ct);
 
-            string sql = _sqlProvider.Get("export_paged");
-            int offset = pageIndex * pageSize;
-            var queryParams = new { Offset = offset, Limit = pageSize };
-            var command = new CommandDefinition(sql, queryParams, cancellationToken: cancellationToken, commandTimeout: 180);
-            string? jsonResult = await connection.ExecuteScalarAsync<string>(command);
-            return jsonResult ?? "[]";
+            // 1) One parent (keyset: next id > lastId)
+            var parent = await connection.QuerySingleOrDefaultAsync<ScoopReportRow>(
+                _sqlProvider.Get("export_report"), // see SQL below
+                new { LastId = lastId },
+                commandTimeout: 180, commandType: System.Data.CommandType.Text);
+
+            if (parent is null)
+                return ("[]", 0, lastId);
+
+            var onlyId = parent.ScoopReportId;
+
+            // 2) Children of that single parent (use = @Id for clarity)
+            var articles = (await connection.QueryAsync<ArticleRow>(
+                _sqlProvider.Get("export_articles"),
+                new { Id = onlyId }, commandTimeout: 180)).ToList();
+
+            var profiles = (await connection.QueryAsync<ProfileRow>(
+                _sqlProvider.Get("export_profiles"),
+                new { Id = onlyId }, commandTimeout: 180)).ToList();
+
+            var profileIds = profiles.Select(p => p.ScoopReportSocialMediaProfileId).ToArray();
+
+            var details = (await connection.QueryAsync<DetailRow>(
+                _sqlProvider.Get("export_profile_details"),
+                new { Id = onlyId },
+                commandTimeout: 180)).ToList();
+
+            // 3) Stitch
+            var reportDto = ExportReportDto.From(parent);
+
+            foreach (var a in articles.OrderBy(x => x.ScoopReportArticleId))
+                reportDto.Articles.Add(ExportArticleDto.From(a));
+
+            var profilesById = new Dictionary<int, ExportProfileDto>(profiles.Count);
+            foreach (var pr in profiles.OrderBy(x => x.ScoopReportSocialMediaProfileId))
+            {
+                var prDto = ExportProfileDto.From(pr);
+                profilesById[prDto.ScoopReportSocialMediaProfileId] = prDto;
+                reportDto.SocialMediaProfiles.Add(prDto);
+            }
+
+            foreach (var d in details.OrderBy(x => x.ScoopReportSocialMediaProfileDetailId))
+                if (profilesById.TryGetValue(d.ScoopReportSocialMediaProfileId, out var prDto))
+                    prDto.ProfileDetails.Add(ExportProfileDetailDto.From(d));
+
+            // 4) Serialize as a single-item array (keeps your downstream consumers happy)
+            string json = JsonSerializer.Serialize(new[] { reportDto }, JsonOptions);
+
+            return (json, 1, onlyId);
         }
 
         /// <summary>Uploads JSON content to S3 bucket.</summary>
@@ -148,30 +209,11 @@ namespace DataExport.Core
             return total;
         }
 
-        /// <summary>Counts items in JSON array.</summary>
-        private static int CountJsonArrayItems(string json)
-        {
-            if (string.IsNullOrWhiteSpace(json))
-                return 0;
-
-            try
-            {
-                using var doc = JsonDocument.Parse(json);
-                if (doc.RootElement.ValueKind == JsonValueKind.Array)
-                    return doc.RootElement.GetArrayLength();
-            }
-            catch
-            {
-                // If it's malformed or not an array, fallback
-            }
-
-            return 0;
-        }
-
         /// <summary>Generates S3 object key for batch and page.</summary>
-        private string GenerateObjectKey(int batchNumber, int pageIndex)
+        private string GenerateObjectKey(int batchNumber, int pageIndex, long id)
         {
-            return $"export_batch{batchNumber}_page{pageIndex}.json";
+            Console.WriteLine($"Batch {batchNumber}, Page {pageIndex}, ReportId {id}");
+            return $"export_batch{batchNumber}_page{pageIndex}_id{id}.json";
         }
     }
 }
